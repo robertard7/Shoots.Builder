@@ -1,4 +1,7 @@
 ﻿#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,40 +20,64 @@ public sealed class BuilderKernel
         _modulesDir = modulesDir ?? throw new ArgumentNullException(nameof(modulesDir));
     }
 
-    public BuildRunResult Run(string text)
+    public BuildRunResult Run(string input)
     {
-        if (string.IsNullOrWhiteSpace(text))
-            throw new ArgumentException("text is required", nameof(text));
+        if (string.IsNullOrWhiteSpace(input))
+            throw new ArgumentException("input is required", nameof(input));
 
-        // Stage 1 plan: input text only, no interpretation
-        var planText = $"INPUT:\n{text.Trim()}\n";
+        // Stage 1: direct command execution (no planning yet)
+        var commandId = input.Trim();
+
+        // Deterministic plan text + hash
+        var planText = $"COMMAND:\n{commandId}\n";
         var hash = Sha256Hex(planText);
 
-        // Deterministic artifact root
-        var root = Path.Combine(
+        var artifactsRoot = Path.Combine(
             Environment.CurrentDirectory,
             "artifacts",
             hash
         );
 
-        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(artifactsRoot);
 
         File.WriteAllText(
-            Path.Combine(root, "plan.txt"),
+            Path.Combine(artifactsRoot, "plan.txt"),
             planText,
             Encoding.UTF8
         );
 
-        // Load external runtime modules (optional, safe if empty)
+        // Load runtime modules
         var loader = new DefaultRuntimeLoader();
-        var modules = Directory.Exists(_modulesDir)
-            ? loader.LoadFromDirectory(_modulesDir)
-            : Array.Empty<IRuntimeModule>();
 
-        // Runtime owns execution
-        var engine = new RuntimeEngine(modules);
+        IReadOnlyList<IRuntimeModule> modules =
+            Directory.Exists(_modulesDir)
+                ? loader.LoadFromDirectory(_modulesDir)
+                : Array.Empty<IRuntimeModule>();
 
-        // Explicit runtime context — no invented fields
+        Console.WriteLine($"[builder] modulesDir = {_modulesDir}");
+        Console.WriteLine($"[builder] loaded modules = {modules.Count}");
+
+        foreach (var m in modules)
+        {
+            Console.WriteLine($"[builder] module: {m.ModuleId} v{m.ModuleVersion}");
+            foreach (var c in m.Describe())
+                Console.WriteLine($"[builder]   command: {c.CommandId}");
+        }
+
+        // Narrator escapes runtime here
+        var narrator = new TextRuntimeNarrator(Console.WriteLine);
+
+        // Structural default helper (runtime law)
+        var helper = new DeterministicRuntimeHelper();
+
+        // Runtime is authoritative
+        var engine = new RuntimeEngine(
+            modules,
+            narrator,
+            helper
+        );
+
+        // Runtime context
         var context = new RuntimeContext(
             SessionId: hash,
             CorrelationId: Guid.NewGuid().ToString("n"),
@@ -58,25 +85,23 @@ public sealed class BuilderKernel
             Services: engine
         );
 
-        // Stage 1 proof: invoke a core command
         var request = new RuntimeRequest(
-            CommandId: "core.ping",
+            CommandId: commandId,
             Args: new Dictionary<string, object?>(),
             Context: context
         );
 
         var result = engine.Execute(request);
 
-        // Builder observes, never interprets runtime internals
         var resultPayload = new
         {
             ok = result.Ok,
             error = result.Error?.ToString(),
-            output = result.Output?.ToString()
+            output = result.Output
         };
 
         File.WriteAllText(
-            Path.Combine(root, "result.json"),
+            Path.Combine(artifactsRoot, "result.json"),
             JsonSerializer.Serialize(
                 resultPayload,
                 new JsonSerializerOptions { WriteIndented = true }
@@ -86,7 +111,7 @@ public sealed class BuilderKernel
 
         return new BuildRunResult(
             Hash: hash,
-            Folder: root,
+            Folder: artifactsRoot,
             Ok: result.Ok
         );
     }
