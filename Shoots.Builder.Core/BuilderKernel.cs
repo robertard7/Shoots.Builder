@@ -17,18 +17,36 @@ public sealed class BuilderKernel
         _modulesDir = modulesDir ?? throw new ArgumentNullException(nameof(modulesDir));
     }
 
+	private static RunState Classify(RuntimeResult result)
+	{
+		if (result.Ok)
+			return RunState.Success;
+
+		if (result.Error is null)
+			return RunState.Invalid;
+
+		return result.Error.Code switch
+		{
+			"missing_file" => RunState.Blocked,
+			"permission_denied" => RunState.Blocked,
+			"tool_not_found" => RunState.Blocked,
+			_ => RunState.Invalid
+		};
+	}
+
     public BuildRunResult Run(string input)
     {
         if (string.IsNullOrWhiteSpace(input))
             throw new ArgumentException("input is required", nameof(input));
 
-        // Stage 1: direct command execution (no planning yet)
+        // --- Command resolution ---
         var commandId = input.Trim();
 
-        // Deterministic plan text + hash
+        // --- Deterministic plan + hash ---
         var planText = $"COMMAND:\n{commandId}\n";
         var hash = Sha256Hex(planText);
 
+        // --- Artifact root (method-scoped, authoritative) ---
         var artifactsRoot = Path.Combine(
             Environment.CurrentDirectory,
             "artifacts",
@@ -43,7 +61,7 @@ public sealed class BuilderKernel
             Encoding.UTF8
         );
 
-        // Load runtime modules
+        // --- Load runtime modules ---
         var loader = new DefaultRuntimeLoader();
 
         IReadOnlyList<IRuntimeModule> modules =
@@ -54,27 +72,25 @@ public sealed class BuilderKernel
         Console.WriteLine($"[builder] modulesDir = {_modulesDir}");
         Console.WriteLine($"[builder] loaded modules = {modules.Count}");
 
-        foreach (var m in modules)
+        foreach (var module in modules)
         {
-            Console.WriteLine($"[builder] module: {m.ModuleId} v{m.ModuleVersion}");
-            foreach (var c in m.Describe())
-                Console.WriteLine($"[builder]   command: {c.CommandId}");
+            Console.WriteLine($"[builder] module: {module.ModuleId} v{module.ModuleVersion}");
+            foreach (var cmd in module.Describe())
+                Console.WriteLine($"[builder]   command: {cmd.CommandId}");
         }
 
-        // Narrator escapes runtime here
+        // --- Builder-owned narrator + helper (runtime escape hatch) ---
         var narrator = new TextRuntimeNarrator(Console.WriteLine);
-
-        // Structural default helper (runtime law)
         var helper = new DeterministicRuntimeHelper();
 
-        // Runtime is authoritative
+        // --- Runtime is authoritative ---
         var engine = new RuntimeEngine(
             modules,
             narrator,
             helper
         );
 
-        // Runtime context
+        // --- Runtime context ---
         var context = new RuntimeContext(
             SessionId: hash,
             CorrelationId: Guid.NewGuid().ToString("n"),
@@ -88,8 +104,10 @@ public sealed class BuilderKernel
             Context: context
         );
 
+        // --- Execute ---
         var result = engine.Execute(request);
 
+        // --- Persist result ---
         var resultPayload = new
         {
             ok = result.Ok,
@@ -106,16 +124,15 @@ public sealed class BuilderKernel
             Encoding.UTF8
         );
 
-		var state = result.Ok
-			? RunState.Success
-			: RunState.Invalid;
+        // --- Law #2: final run state ---
+        var state = Classify(result);
 
-		return new BuildRunResult(
-			hash,
-			root,
-			state,
-			result.Error?.Code
-		);
+        return new BuildRunResult(
+            hash,
+            artifactsRoot,
+            state,
+            result.Error?.Code
+        );
     }
 
     private static string Sha256Hex(string input)
@@ -132,4 +149,3 @@ public sealed record BuildRunResult(
     RunState State,
     string? Reason = null
 );
-
