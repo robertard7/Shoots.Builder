@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>[Project Name TBD]</strong><br />
+  <strong>[Shoots.Builder]</strong><br />
   Deterministic build orchestration on top of Shoots.Runtime
 </p>
 
