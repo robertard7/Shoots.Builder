@@ -106,11 +106,16 @@ public sealed class BuilderKernel
             Encoding.UTF8
         );
 
-        return new BuildRunResult(
-            Hash: hash,
-            Folder: artifactsRoot,
-            Ok: result.Ok
-        );
+		var state = result.Ok
+			? RunState.Success
+			: RunState.Invalid;
+
+		return new BuildRunResult(
+			hash,
+			root,
+			state,
+			result.Error?.Code
+		);
     }
 
     private static string Sha256Hex(string input)
@@ -124,5 +129,7 @@ public sealed class BuilderKernel
 public sealed record BuildRunResult(
     string Hash,
     string Folder,
-    bool Ok
+    RunState State,
+    string? Reason = null
 );
+
