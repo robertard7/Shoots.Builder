@@ -1,0 +1,5 @@
+﻿{
+  "ok": false,
+  "error": "RuntimeError { Code = unknown_command, Message = Unknown command \u0027core.ping\u0027, Details =  }",
+  "output": null
+}
