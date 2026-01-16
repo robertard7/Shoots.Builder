@@ -34,6 +34,85 @@ public sealed class BuilderKernel
 		};
 	}
 
+	private static object BuildResolution(
+		RunState state,
+		RuntimeResult result
+	)
+	{
+		if (result.Error is null)
+		{
+			return new
+			{
+				state = state.ToString().ToLowerInvariant(),
+				error = new
+				{
+					code = "unknown",
+					message = "Unknown failure",
+					details = (object?)null
+				},
+				required = Array.Empty<object>()
+			};
+		}
+
+		return new
+		{
+			state = state.ToString().ToLowerInvariant(),
+			error = new
+			{
+				code = result.Error.Code,
+				message = result.Error.Message,
+				details = result.Error.Details
+			},
+			required = RequiredActions(result.Error)
+		};
+	}
+
+	private static object[] RequiredActions(RuntimeError error)
+	{
+		return error.Code switch
+		{
+			"missing_file" => new[]
+			{
+				new
+				{
+					actor = "user",
+					action = "provide_file",
+					target = error.Details?.ToString() ?? "unknown"
+				}
+			},
+
+			"permission_denied" => new[]
+			{
+				new
+				{
+					actor = "system",
+					action = "grant_permission",
+					target = error.Details?.ToString() ?? "unknown"
+				}
+			},
+
+			"tool_not_found" => new[]
+			{
+				new
+				{
+					actor = "system",
+					action = "install_tool",
+					target = error.Details?.ToString() ?? "unknown"
+				}
+			},
+
+			_ => new[]
+			{
+				new
+				{
+					actor = "user",
+					action = "fix_input",
+					target = "command_arguments"
+				}
+			}
+		};
+	}
+
     public BuildRunResult Run(string input)
     {
         if (string.IsNullOrWhiteSpace(input))
@@ -125,14 +204,29 @@ public sealed class BuilderKernel
         );
 
         // --- Law #2: final run state ---
-        var state = Classify(result);
+		var state = Classify(result);
 
-        return new BuildRunResult(
-            hash,
-            artifactsRoot,
-            state,
-            result.Error?.Code
-        );
+		// Always write resolution on non-success
+		if (state != RunState.Success)
+		{
+			var resolution = BuildResolution(state, result);
+
+			File.WriteAllText(
+				Path.Combine(artifactsRoot, "resolution.json"),
+				JsonSerializer.Serialize(
+					resolution,
+					new JsonSerializerOptions { WriteIndented = true }
+				),
+				Encoding.UTF8
+			);
+		}
+
+		return new BuildRunResult(
+			hash,
+			artifactsRoot,
+			state,
+			result.Error?.Code
+		);
     }
 
     private static string Sha256Hex(string input)
