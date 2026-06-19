@@ -1,4 +1,4 @@
-﻿#nullable enable
+#nullable enable
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -163,11 +163,7 @@ public sealed class BuilderKernel
         var helper = new DeterministicRuntimeHelper();
 
         // --- Runtime is authoritative ---
-        var engine = new RuntimeEngine(
-            modules,
-            narrator,
-            helper
-        );
+        var engine = new RuntimeEngine(modules, narrator);
 
         // --- Runtime context ---
         var context = new RuntimeContext(
@@ -243,3 +239,4 @@ public sealed record BuildRunResult(
     RunState State,
     string? Reason = null
 );
+

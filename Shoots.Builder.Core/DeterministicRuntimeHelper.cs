@@ -13,18 +13,18 @@ public sealed class DeterministicRuntimeHelper : IRuntimeHelper
     public RuntimeResult Help(RuntimeRequest request)
     {
         if (request is null)
-            return RuntimeResult.Fail(RuntimeError.Internal("Null request"));
+            return new RuntimeResult { Ok = false, Error = new RuntimeError("internal_error", "Null request") };
 
         var services = request.Context.Services;
         if (services is null)
-            return RuntimeResult.Fail(RuntimeError.Internal("Runtime services unavailable"));
+            return new RuntimeResult { Ok = false, Error = new RuntimeError("internal_error", "Runtime services unavailable") };
 
         // If a command id was provided, describe that command.
         if (!string.IsNullOrWhiteSpace(request.CommandId))
         {
             var spec = services.GetCommand(request.CommandId);
             if (spec is not null)
-                return RuntimeResult.Success(DescribeCommand(spec));
+                return new RuntimeResult { Ok = true, Output = new RuntimeValue { Kind = RuntimeValueKind.String, String = DescribeCommand(spec).ToString() } };
         }
 
         // Otherwise, list all known commands.
@@ -32,11 +32,7 @@ public sealed class DeterministicRuntimeHelper : IRuntimeHelper
                           .OrderBy(c => c.CommandId, StringComparer.OrdinalIgnoreCase)
                           .ToArray();
 
-        return RuntimeResult.Success(new
-        {
-            commands = all.Select(c => c.CommandId).ToArray(),
-            count = all.Length
-        });
+        return new RuntimeResult { Ok = true, Output = new RuntimeValue { Kind = RuntimeValueKind.String, String = string.Join(", ", all.Select(c => c.CommandId)) } };
     }
 
     private static object DescribeCommand(RuntimeCommandSpec spec)
@@ -93,3 +89,5 @@ public sealed class DeterministicRuntimeHelper : IRuntimeHelper
             _ => "value"
         };
 }
+
+
